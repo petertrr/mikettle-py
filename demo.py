@@ -16,7 +16,9 @@ from mikettle.mikettle import (
   MI_SET_TEMPERATURE,
   MI_CURRENT_TEMPERATURE,
   MI_KW_TYPE,
-  MI_KW_TIME
+  MI_CURRENT_KW_TIME,
+  MI_SET_KW_TIME,
+  MI_EWU,
 )
 
 def valid_mikettle_mac(mac, pat=re.compile(r"[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}")):
@@ -45,12 +47,27 @@ def connect(args):
     print("Getting data from mi Kettle")
     print("FW: {}".format(kettle.firmware_version()))
     print("Name: {}".format(kettle.name()))
+    print("Manufacturer: {}".format(kettle.manufacturer()))
 
-    try:
-      print("Current temperature: {}".format(kettle.parameter_value(MI_CURRENT_TEMPERATURE)))
-    except Exception as error:
-      print("Read failed")
-      print(error)
+    kettle.setKW(KWtype=1,temperature=75)
+    kettle.setKWTime(time=17)
+    kettle.setEWU(mode=0)
+    print("Keep warm type: {}".format(kettle.KW()[0]))
+    print("Set temperature: {}".format(kettle.KW()[1]))
+    print("Set keep warm time: {} hours".format(kettle.KWTime()/2))
+    print("Extended warm up: {}".format(kettle.EWU()))
+
+    print("\nRead from status notification:")
+
+
+    print("Action: {}".format(kettle.parameter_value(MI_ACTION)))
+    print("Mode: {}".format(kettle.parameter_value(MI_MODE)))
+    print("Set temperature: {}".format(kettle.parameter_value(MI_SET_TEMPERATURE)))
+    print("Current temperature: {}".format(kettle.parameter_value(MI_CURRENT_TEMPERATURE)))
+    print("Keep warm type: {}".format(kettle.parameter_value(MI_KW_TYPE)))
+    print("Current keep warm time: {} minutes".format(kettle.parameter_value(MI_CURRENT_KW_TIME)))
+    print("Extended warm up: {}".format(kettle.parameter_value(MI_EWU)))
+    print("Set keep warm time: {} hours".format(kettle.parameter_value(MI_SET_KW_TIME)/2))
 
 def main():
     """Main function.

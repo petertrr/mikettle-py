@@ -11,11 +11,15 @@ _KEY1 = bytes([0x90, 0xCA, 0x85, 0xDE])
 _KEY2 = bytes([0x92, 0xAB, 0x54, 0xFA])
 
 _HANDLE_READ_FIRMWARE_VERSION = 26
+_HANDLE_READ_MANU = 18
 _HANDLE_READ_NAME = 20
 _HANDLE_AUTH_INIT = 44
 _HANDLE_AUTH = 37
-_HANDLE_VERSION = 42
+_HANDLE_VERIFY = 42
 _HANDLE_STATUS = 61
+_HANDLE_KW = 58
+_HANDLE_KW_TIME = 65
+_HANDLE_EWU = 68
 
 _UUID_SERVICE_KETTLE = "fe95"
 _UUID_SERVICE_KETTLE_DATA = "01344736-0000-1000-8000-262837236156"
@@ -27,7 +31,9 @@ MI_MODE = "mode"
 MI_SET_TEMPERATURE = "set temperature"
 MI_CURRENT_TEMPERATURE = "current temperature"
 MI_KW_TYPE = "keep warm type"
-MI_KW_TIME = "keep warm time"
+MI_CURRENT_KW_TIME = "current keep warm time"
+MI_SET_KW_TIME = "set keep warm time"
+MI_EWU = "extended warm up"
 
 MI_ACTION_MAP = {
     0: "idle",
@@ -39,12 +45,17 @@ MI_ACTION_MAP = {
 MI_MODE_MAP = {
     255: "none",
     1: "boil",
-    3: "keep warm"
+    2: "keep warm"
 }
 
 MI_KW_TYPE_MAP = {
-    0: "warm up",
-    1: "cool down"
+    0: "cool down to set temperature",
+    1: "warm up to set temperature"
+}
+
+MI_EWU_MAP = {
+    0: "true",
+    1: "false"
 }
 
 _LOGGER = logging.getLogger(__name__)
@@ -97,6 +108,17 @@ class MiKettle(object):
                             " from Mi Kettle %s" % (_HANDLE_READ_NAME, self._mac))
         return ''.join(chr(n) for n in name)
 
+    def manufacturer(self):
+        """Return the manufacturer of the device."""
+        self.connect()
+        self.auth()
+        name = self._p.readCharacteristic(_HANDLE_READ_MANU)
+
+        if not name:
+            raise Exception("Could not read MANUFACTURER using handle %s"
+                            " from Mi Kettle %s" % (_HANDLE_READ_NAME, self._mac))
+        return ''.join(chr(n) for n in name)
+
     def firmware_version(self):
         """Return the firmware version."""
         self.connect()
@@ -107,6 +129,56 @@ class MiKettle(object):
             raise Exception("Could not read FIRMWARE_VERSION using handle %s"
                             " from Mi Kettle %s" % (_HANDLE_READ_FIRMWARE_VERSION, self._mac))
         return ''.join(chr(n) for n in firmware_version)
+
+    def KW(self):
+        """Return the Keep Warm Type and Keep Warm Temp."""
+        self.connect()
+        self.auth()
+        data = self._p.readCharacteristic(_HANDLE_KW)
+
+        kwType = MI_KW_TYPE_MAP[int(data[0])]
+        kwTemp = int(data[1])
+
+        return kwType, kwTemp
+
+    def setKW(self,KWtype,temperature):
+        """Set the Keep Warm Type and Keep Warm Temperature.
+        Type is 0 or 1, temperature is """
+        self.connect()
+        self.auth()
+        self._p.writeCharacteristic(_HANDLE_KW, bytes([KWtype,temperature]), "true")
+
+    def KWTime(self):
+        """Return the Keep Warm Time."""
+        self.connect()
+        self.auth()
+        data = self._p.readCharacteristic(_HANDLE_KW_TIME)
+
+        kwTime = int(data[0])
+
+        return kwTime
+
+    def setKWTime(self,time):
+        """Set the Keep Warm Time."""
+        self.connect()
+        self.auth()
+        self._p.writeCharacteristic(_HANDLE_KW_TIME, bytes([time]), "true")
+
+    def EWU(self):
+        """Return whether extended warm up is set."""
+        self.connect()
+        self.auth()
+        data = self._p.readCharacteristic(_HANDLE_EWU)
+
+        ewu = MI_EWU_MAP[int(data[0])]
+
+        return ewu
+
+    def setEWU(self,mode):
+        """Set extended warm up."""
+        self.connect()
+        self.auth()
+        self._p.writeCharacteristic(_HANDLE_EWU, bytes([mode]), "true")
 
     def parameter_value(self, parameter, read_cached=True):
         """Return a value of one of the monitored paramaters.
@@ -167,7 +239,9 @@ class MiKettle(object):
         res[MI_SET_TEMPERATURE] = int(data[4])
         res[MI_CURRENT_TEMPERATURE] = int(data[5])
         res[MI_KW_TYPE] = MI_KW_TYPE_MAP[int(data[6])]
-        res[MI_KW_TIME] = MiKettle.bytes_to_int(data[7:8])
+        res[MI_CURRENT_KW_TIME] = MiKettle.bytes_to_int(data[7:8])
+        res[MI_EWU] = MI_EWU_MAP[int(data[9])]
+        res[MI_SET_KW_TIME] = int(data[10])
         return res
 
     @staticmethod
@@ -196,7 +270,7 @@ class MiKettle(object):
 
         self._p.writeCharacteristic(_HANDLE_AUTH, MiKettle.cipher(self._token, _KEY2), "true")
 
-        self._p.readCharacteristic(_HANDLE_VERSION)
+        self._p.readCharacteristic(_HANDLE_VERIFY)
         self._authenticated = True
 
     def subscribeToData(self):
@@ -286,5 +360,3 @@ class MiKettle(object):
                     timedelta(seconds=300)
         else:
             _LOGGER.error("Unknown notification from handle: %s with Data: %s", cHandle, data.hex())
-
-
