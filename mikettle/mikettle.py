@@ -3,9 +3,10 @@ Read data from Mi Kettle.
 """
 
 import logging
-from bluepy.btle import UUID, Peripheral, DefaultDelegate
+from bluepy.btle import UUID, Peripheral, DefaultDelegate, ADDR_TYPE_RANDOM, BTLEInternalError
 from datetime import datetime, timedelta
 from threading import Lock
+import time
 
 _KEY1 = bytes([0x90, 0xCA, 0x85, 0xDE])
 _KEY2 = bytes([0x92, 0xAB, 0x54, 0xFA])
@@ -49,7 +50,7 @@ MI_MODE_MAP = {
 }
 
 MI_KW_TYPE_MAP = {
-    0: "cool down to set temperature",
+    0: "boil and cool down to set temperature",
     1: "warm up to set temperature"
 }
 
@@ -94,7 +95,8 @@ class MiKettle(object):
 
     def connect(self):
         if self._p is None:
-            self._p = Peripheral(deviceAddr=self._mac, iface=self._iface)
+            _LOGGER.debug("Attempt to connect, because cached connection is not yet available")
+            self._p = Peripheral(deviceAddr=self._mac, iface=self._iface)  # addrType=ADDR_TYPE_RANDOM)
             self._p.setDelegate(self)
 
     def name(self):
@@ -141,12 +143,13 @@ class MiKettle(object):
 
         return kwType, kwTemp
 
-    def setKW(self,KWtype,temperature):
+    def setKW(self, KWtype: int, temperature: int):
         """Set the Keep Warm Type and Keep Warm Temperature.
         Type is 0 or 1, temperature is """
         self.connect()
         self.auth()
         self._p.writeCharacteristic(_HANDLE_KW, bytes([KWtype,temperature]), "true")
+#        self.clear_cache()
 
     def KWTime(self):
         """Return the Keep Warm Time."""
@@ -206,21 +209,32 @@ class MiKettle(object):
     def fill_cache(self):
         """Fill the cache with new data from the sensor."""
         _LOGGER.debug('Filling cache with new sensor data.')
-        try:
-            _LOGGER.debug('Connect')
-            self.connect()
-            _LOGGER.debug('Auth')
-            self.auth()
-            _LOGGER.debug('Subscribe')
-            self.subscribeToData()
-            _LOGGER.debug('Wait for data')
-            self._p.waitForNotifications(self.ble_timeout)
-            # If a sensor doesn't work, wait 5 minutes before retrying
-        except Exception as error:
-            _LOGGER.debug('Error %s', error)
-            self._last_read = datetime.now() - self._cache_timeout + \
-                timedelta(seconds=300)
-            return
+        for i in range(self.retries):
+            _LOGGER.debug("Connection attempt {} of {}".format(i + 1, self.retries))
+            try:
+                _LOGGER.debug('Connect')
+                self.connect()
+                _LOGGER.debug('Auth')
+                self.auth()
+                _LOGGER.debug('Subscribe')
+                self.subscribeToData()
+                _LOGGER.debug('Wait for data')
+                self._p.waitForNotifications(self.ble_timeout)
+                break
+            except BTLEInternalError as ble_error:
+                _LOGGER.debug("BTLEInternalError {}".format(ble_error))
+                if self._p is not None:
+                    self._p.disconnect()
+                    self._p = None
+                    self._authenticated = False
+                # If a sensor doesn't work, wait 5 minutes before retrying
+            except Exception as error:
+                _LOGGER.debug('Error %s', error)
+                if i == self.retries - 1:
+                    self._last_read = datetime.now() - self._cache_timeout + \
+                        timedelta(seconds=300)
+                    return
+                time.sleep(3)
 
     def clear_cache(self):
         """Manually force the cache to be cleared."""
@@ -255,6 +269,7 @@ class MiKettle(object):
     def auth(self):
         if self._authenticated:
             return
+        _LOGGER.debug("Attempt to auth, because self._authenticated is False")
         auth_service = self._p.getServiceByUUID(_UUID_SERVICE_KETTLE)
         auth_descriptors = auth_service.getDescriptors()
 
@@ -348,9 +363,9 @@ class MiKettle(object):
             if data is None:
               return
 
-            _LOGGER.debug("Parse data: %s", data)
+            _LOGGER.debug(f"Parse data: {data} / {data.hex()}")
             self._cache = self._parse_data(data)
-            _LOGGER.debug("data parsed %s", self._cache)
+            _LOGGER.debug(f"data parsed {self._cache}")
 
             if self.cache_available():
                 self._last_read = datetime.now()
